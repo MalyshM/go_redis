@@ -1,19 +1,54 @@
 package main
 
 import (
+	"bufio"
 	"log"
 	"net/http"
+	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"redis/internal/api"
 	ownmap "redis/internal/map"
 )
 
+func loadEnv(path string) map[string]string {
+	env := map[string]string{}
+	f, err := os.Open(path)
+	if err != nil {
+		return env
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("failed to close file: %v", err)
+		}
+	}()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			env[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	return env
+}
+
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	om := ownmap.NewOwnMap(1_000_000)
+	env := loadEnv(".env")
+	var om ownmap.Map
+	switch env["MAP_TYPE"] {
+	case "std":
+		om = ownmap.NewStdMap()
+	default:
+		om = ownmap.NewOwnMap(1_000_000)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/set", logging(api.SetHandler(om)))

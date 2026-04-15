@@ -151,3 +151,88 @@ func TestNewKeyValue(t *testing.T) {
 		t.Errorf("NewKeyValue = {%q, %q, %v}, want {k, v, %v}", kv.key, kv.value, kv.expiresAt, expiry)
 	}
 }
+
+func TestKeyValueInterface(t *testing.T) {
+	kv := NewKeyValue("hello", "world", noExpiry)
+	var item KeyValueItem = kv
+	if item.Key() != "hello" {
+		t.Errorf("Key() = %q, want %q", item.Key(), "hello")
+	}
+	if item.Value() != "world" {
+		t.Errorf("Value() = %q, want %q", item.Value(), "world")
+	}
+}
+
+// mapTestCase — общий набор тестов для любой реализации Map
+func runMapTests(t *testing.T, m Map) {
+	t.Helper()
+
+	m.Set("foo", "bar", noExpiry)
+	if got := m.Get("foo"); got != "bar" {
+		t.Errorf("Get(foo) = %q, want %q", got, "bar")
+	}
+
+	// перезапись
+	m.Set("foo", "baz", noExpiry)
+	if got := m.Get("foo"); got != "baz" {
+		t.Errorf("Get(foo) after overwrite = %q, want %q", got, "baz")
+	}
+
+	// отсутствующий ключ
+	if got := m.Get("missing"); got != "" {
+		t.Errorf("Get(missing) = %q, want empty", got)
+	}
+
+	// Keys / Values
+	m.Set("a", "1", noExpiry)
+	m.Set("b", "2", noExpiry)
+	if l := len(m.Keys()); l < 2 {
+		t.Errorf("Keys() len = %d, want >= 2", l)
+	}
+	if l := len(m.Values()); l < 2 {
+		t.Errorf("Values() len = %d, want >= 2", l)
+	}
+
+	// Remove
+	m.Set("del", "x", noExpiry)
+	m.Remove("del")
+	if got := m.Get("del"); got != "" {
+		t.Errorf("Get(del) after Remove = %q, want empty", got)
+	}
+
+	// Remove несуществующего — не должно паниковать
+	m.Remove("nonexistent")
+}
+
+func TestOwnMapInterface(t *testing.T) {
+	runMapTests(t, NewOwnMap(16))
+}
+
+func TestStdMapInterface(t *testing.T) {
+	runMapTests(t, NewStdMap())
+}
+
+func TestStdMapTTLIgnored(t *testing.T) {
+	m := NewStdMap()
+	m.Set("key", "val", time.Now().Add(-time.Hour)) // истёкший TTL игнорируется
+	if got := m.Get("key"); got != "val" {
+		t.Errorf("Get(key) = %q, want %q", got, "val")
+	}
+}
+
+func TestStdMapLarge(t *testing.T) {
+	const n = 100_000
+	m := NewStdMap()
+	expected := make(map[string]string, n)
+	for i := 0; i < n; i++ {
+		key := fmt.Sprintf("key-%d", rand.Int())
+		val := fmt.Sprintf("val-%d", rand.Int())
+		expected[key] = val
+		m.Set(key, val, noExpiry)
+	}
+	for k, v := range expected {
+		if got := m.Get(k); got != v {
+			t.Errorf("Get(%q) = %q, want %q", k, got, v)
+		}
+	}
+}
