@@ -5,18 +5,17 @@ import (
 	"time"
 )
 
-// TODO: надо сделать интерфейс мапы, интерфейс KeyValue
-// надо подумать как сделать KeyValue без ttl
-// интерфейс должен совпадать с базовой мапой go, с мапой
-// го для параллельных вычислений
-// в .env нужно сделать параметр выбора типа мапы
-type OwnMap struct {
-	mu            sync.RWMutex
-	keys          []int
-	values        [][]KeyValue
-	capacity      int
-	cleaner       *time.Ticker
-	default_value string
+type Map interface {
+	Set(key, value string, expiresAt time.Time)
+	Get(key string) string
+	Remove(key string)
+	Keys() []string
+	Values() []string
+}
+
+type KeyValueItem interface {
+	Key() string
+	Value() string
 }
 
 type KeyValue struct {
@@ -25,12 +24,20 @@ type KeyValue struct {
 	expiresAt time.Time
 }
 
-func NewKeyValue(key string, value string, expires_at time.Time) KeyValue {
-	return KeyValue{
-		key:       key,   // len=0, cap=capacity
-		value:     value, // len=0, cap=capacity
-		expiresAt: expires_at,
-	}
+func (kv KeyValue) Key() string   { return kv.key }
+func (kv KeyValue) Value() string { return kv.value }
+
+func NewKeyValue(key, value string, expiresAt time.Time) KeyValue {
+	return KeyValue{key: key, value: value, expiresAt: expiresAt}
+}
+
+// OwnMap — хэш-мапа с TTL
+type OwnMap struct {
+	mu       sync.RWMutex
+	keys     []int
+	values   [][]KeyValue
+	capacity int
+	cleaner  *time.Ticker
 }
 
 func NewOwnMap(capacity int) *OwnMap {
@@ -43,40 +50,39 @@ func NewOwnMap(capacity int) *OwnMap {
 	return om
 }
 
-func (om *OwnMap) Set(key string, value string, expires_at time.Time) {
+func (om *OwnMap) Set(key, value string, expiresAt time.Time) {
 	om.mu.Lock()
 	defer om.mu.Unlock()
-	inner_key := hashString(key, om.capacity)
-	om.keys[inner_key] = inner_key
-	for index, k_v := range om.values[inner_key] {
-		if key == k_v.key {
-			om.values[inner_key][index].value = value
-			om.values[inner_key][index].expiresAt = expires_at
+	idx := hashString(key, om.capacity)
+	om.keys[idx] = idx
+	for i, kv := range om.values[idx] {
+		if kv.key == key {
+			om.values[idx][i].value = value
+			om.values[idx][i].expiresAt = expiresAt
 			return
 		}
 	}
-	om.values[inner_key] = append(om.values[inner_key], NewKeyValue(key, value, expires_at))
+	om.values[idx] = append(om.values[idx], NewKeyValue(key, value, expiresAt))
 }
 
 func (om *OwnMap) Get(key string) string {
 	om.mu.RLock()
 	defer om.mu.RUnlock()
-	inner_key := hashString(key, om.capacity)
-	for _, v := range om.values[inner_key] {
-		if v.key == key {
-			return v.value
+	for _, kv := range om.values[hashString(key, om.capacity)] {
+		if kv.key == key {
+			return kv.value
 		}
 	}
-	return om.default_value
+	return ""
 }
 
 func (om *OwnMap) Remove(key string) {
 	om.mu.Lock()
 	defer om.mu.Unlock()
-	inner_key := hashString(key, om.capacity)
-	for i, v := range om.values[inner_key] {
-		if v.key == key {
-			om.values[inner_key][i] = KeyValue{}
+	idx := hashString(key, om.capacity)
+	for i, kv := range om.values[idx] {
+		if kv.key == key {
+			om.values[idx][i] = KeyValue{}
 		}
 	}
 }
@@ -85,9 +91,11 @@ func (om *OwnMap) Keys() []string {
 	om.mu.RLock()
 	defer om.mu.RUnlock()
 	keys := make([]string, 0, om.capacity)
-	for _, v := range om.values {
-		for _, k_v := range v {
-			keys = append(keys, k_v.key)
+	for _, bucket := range om.values {
+		for _, kv := range bucket {
+			if kv.key != "" {
+				keys = append(keys, kv.key)
+			}
 		}
 	}
 	return keys
@@ -96,35 +104,25 @@ func (om *OwnMap) Keys() []string {
 func (om *OwnMap) Values() []string {
 	om.mu.RLock()
 	defer om.mu.RUnlock()
-	values := make([]string, 0, om.capacity)
-	for _, v := range om.values {
-		for _, k_v := range v {
-			values = append(values, k_v.value)
+	vals := make([]string, 0, om.capacity)
+	for _, bucket := range om.values {
+		for _, kv := range bucket {
+			if kv.key != "" {
+				vals = append(vals, kv.value)
+			}
 		}
 	}
-	return values
+	return vals
 }
 
 func (om *OwnMap) Items() []KeyValue {
 	om.mu.RLock()
 	defer om.mu.RUnlock()
-	values := make([]KeyValue, 0, om.capacity)
-	for _, v := range om.values {
-		for _, k_v := range v {
-			values = append(values, k_v)
-		}
+	items := make([]KeyValue, 0, om.capacity)
+	for _, bucket := range om.values {
+		items = append(items, bucket...)
 	}
-	return values
-}
-
-func hashString(s string, capacity int) int {
-	var h uint = 5381 // djb2 алгоритм
-
-	for i := 0; i < len(s); i++ {
-		h = h*33 + uint(s[i])
-	}
-
-	return int(h % uint(capacity))
+	return items
 }
 
 func (om *OwnMap) RunCleaner(interval time.Duration) {
@@ -138,9 +136,56 @@ func (om *OwnMap) RunCleaner(interval time.Duration) {
 
 func (om *OwnMap) cleanupExpired() {
 	now := time.Now()
-	for _, k_v := range om.Items() {
-		if !k_v.expiresAt.IsZero() && k_v.expiresAt.Before(now) {
-			om.Remove(k_v.key)
+	for _, kv := range om.Items() {
+		if !kv.expiresAt.IsZero() && kv.expiresAt.Before(now) {
+			om.Remove(kv.key)
 		}
 	}
+}
+
+// StdMap — обёртка над sync.Map без TTL (expiresAt игнорируется)
+type StdMap struct {
+	m sync.Map
+}
+
+func NewStdMap() *StdMap { return &StdMap{} }
+
+func (s *StdMap) Set(key, value string, _ time.Time) {
+	s.m.Store(key, value)
+}
+
+func (s *StdMap) Get(key string) string {
+	v, ok := s.m.Load(key)
+	if !ok {
+		return ""
+	}
+	return v.(string)
+}
+
+func (s *StdMap) Remove(key string) { s.m.Delete(key) }
+
+func (s *StdMap) Keys() []string {
+	var keys []string
+	s.m.Range(func(k, _ any) bool {
+		keys = append(keys, k.(string))
+		return true
+	})
+	return keys
+}
+
+func (s *StdMap) Values() []string {
+	var vals []string
+	s.m.Range(func(_, v any) bool {
+		vals = append(vals, v.(string))
+		return true
+	})
+	return vals
+}
+
+func hashString(s string, capacity int) int {
+	var h uint = 5381
+	for i := 0; i < len(s); i++ {
+		h = h*33 + uint(s[i])
+	}
+	return int(h % uint(capacity))
 }

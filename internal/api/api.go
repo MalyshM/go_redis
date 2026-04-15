@@ -19,7 +19,7 @@ type GetResponse struct {
 	Value string `json:"value"`
 }
 
-func SetHandler(om *ownmap.OwnMap) http.HandlerFunc {
+func SetHandler(om ownmap.Map) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req SetRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -61,7 +61,7 @@ func SwaggerHandler() http.HandlerFunc {
 		http.ServeFile(w, r, "swagger.yaml")
 	}
 }
-func GetHandler(om *ownmap.OwnMap) http.HandlerFunc {
+func GetHandler(om ownmap.Map) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.Query().Get("key")
 		if key == "" {
