@@ -1,0 +1,3 @@
+ci/cd autotests
+go vet
+go fix?

@@ -1,0 +1,68 @@
+openapi: 3.0.0
+info:
+  title: go_redis_map API
+  version: 1.0.0
+
+paths:
+  /set:
+    post:
+      summary: Set a key-value pair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetRequest'
+            example:
+              key: foo
+              value: bar
+              ttl_ms: 5000
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Invalid JSON
+
+  /get:
+    get:
+      summary: Get a value by key
+      parameters:
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+          example: foo
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetResponse'
+        '400':
+          description: Missing key
+        '404':
+          description: Key not found
+
+components:
+  schemas:
+    SetRequest:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+        ttl_ms:
+          type: integer
+          description: TTL in milliseconds, 0 means no expiry
+
+    GetResponse:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
