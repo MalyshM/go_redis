@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -38,7 +39,7 @@ func SetHandler(om ownmap.Map) http.HandlerFunc {
 func DocsHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(`<!DOCTYPE html>
+		_, err := w.Write([]byte(`<!DOCTYPE html>
 <html>
 <head>
 	<title>API Docs</title>
@@ -53,6 +54,10 @@ func DocsHandler() http.HandlerFunc {
 </script>
 </body>
 </html>`))
+		if err != nil {
+			log.Printf("failed to write response: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
 	}
 }
 
@@ -74,6 +79,10 @@ func GetHandler(om ownmap.Map) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(GetResponse{Key: key, Value: value})
+		err := json.NewEncoder(w).Encode(GetResponse{Key: key, Value: value})
+		if err != nil {
+			log.Printf("failed to encode JSON response: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
 	}
 }
