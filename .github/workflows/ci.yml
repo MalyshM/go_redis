@@ -20,9 +20,9 @@ jobs:
         run: go vet ./...
 
       - name: lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.25.0
+          version: latest
 
       - name: test
         run: go test ./... -race -count=1
